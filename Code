@@ -1,0 +1,2116 @@
+Lab 10 code
+struct path {
+	int xpath;
+	int ypath;
+};
+typedef struct path p;
+
+p Path[3000];
+
+
+struct food{
+	int xcoor;
+	int ycoor;
+	int present;
+};
+typedef struct food f;
+
+f Food[256];
+
+struct turn {
+	int xturn;
+	int yturn;
+};
+typedef struct turn t;
+	
+t Turn[100];
+
+struct redtarget {
+	int open;
+	int tar;
+	
+};
+typedef struct redtarget r;
+	
+r Redtarget[4];
+
+struct bigdot {
+	int x;
+	int y;
+	int present;
+};
+typedef struct bigdot b;
+b Bigdot[4] = {
+	{5,139, 1},	//5,20
+	{115,139, 1},	//115,20
+	{5,45, 1},	//5,114
+	{115,45, 1}	//115,114
+};
+
+// *************************** Capture image dimensions out of BMP**********
+int x;
+int y;
+int position = 61;
+int coordinate;
+int nwposition;
+int MP;
+int Mx;
+int My;
+int Px = 61;
+int Py = 115;
+int dir=0;
+int turn=0;
+int newRdir;
+int Rx=41;		
+int Ry=59;	
+int Rxt;
+int Ryt;
+int Rdir=0;
+int Rhold;
+int PGx=50;
+int PGy=59;
+int PGdir=0;
+int newPGdir;
+int Ox=63;
+int Oy=59;
+int Odir=0;
+int newOdir;
+int Cx=75;
+int Cy=59; 
+int Cdir=0;
+int newCdir;
+int i;
+int j;
+int k;
+int fd;
+int score=0;
+int score1;
+int score2;
+int score3;
+int score4;
+unsigned short RGfifo[8][8];
+unsigned short RGout[64];
+int countr;
+
+
+int nextdir=4;//start at something that the user can't press
+int clr=0;
+
+void pac_dead (void){
+	while(1){
+		
+	ST7735_SetCursor(7, 7);	
+	ST7735_OutString("You lose");
+	ST7735_SetCursor(8, 8);	
+	ST7735_OutString("Bitch!");		
+	}
+}
+
+void Winner(void){
+	while(1){
+	ST7735_SetCursor(8, 7);	
+	ST7735_OutString("Winner!!!");
+
+	}
+	//while(1); just dont return, maybe prompt user to play again
+	//draw victory screen
+}
+/////////////////////////////////////////////////
+
+void Element_Init(void){		//almost ready to implement
+int fdct=0;
+	for(j=0;j<160;j++){	//y axis
+		for(i=0;i<128;i++){		//i=x axis
+			if(Pacman1[j][i]==0xFFFF){
+				Food[fdct].xcoor=i-3;				//x pixels normal, y are 160-j
+				Food[fdct].ycoor=(159-(j-3));
+				Food[fdct].present=1;
+				fdct++;
+			}
+		}
+	}	
+}
+
+//////////////////////////////////////////////////
+void Path_Init(void){
+	k=0;
+	for(j=0;j<160;j++){
+		for(i=0;i<128;i++){
+		if(Pacman1[j][i]==0x079F){
+			Path[k].xpath=i;
+			Path[k].ypath=(159-j);	//this way can index through array with normal coordinates
+			k++;
+			}//if
+		}//fori
+	}//forj
+}
+//////////////////////////////////////////////////
+void Turn_Init(void){
+	k=0;
+	for(j=0;j<160;j++){
+		for(i=0;i<128;i++){
+			if(Pacman1[j][i]==0x20FD){		//determine what hex red is
+				Turn[k].xturn=(i-1);
+				Turn[k].yturn=(159-(j-1));
+				k++;
+			}
+		}
+	}
+}
+//////////////////////////////////////////////////
+void Port_Init(){
+	int wait=5;
+	SYSCTL_RCGCGPIO_R |= 0X02;
+	while(wait!=0){wait--;}
+	
+	//GPIO_PORTF_PUR_R = 0x11;//POSITIVE LOGIC
+	GPIO_PORTB_DEN_R |= 0X0F;
+	GPIO_PORTB_DIR_R &= ~0X0F;
+	GPIO_PORTB_DATA_R &= 0XE0; //clear pins 0-4
+}
+
+void SysTick_Init(void){
+	NVIC_ST_CTRL_R = 0;
+	NVIC_ST_RELOAD_R = 400000;//interrupt every .05 seconds
+	NVIC_ST_CURRENT_R = 0;
+	NVIC_ST_CTRL_R = 7; //enable interrupts
+}
+
+void SysTick_Handler(void){
+	//output score here??
+};
+
+void blue_ghost(void){
+	int timer=50; //pick a number that makes this function run for approximately 5 seconds of real time
+	while(timer!=0){
+		timer--;
+		Delay100ms(1);	
+		
+	//have a copy of pacman's movement
+	//way to maintain the players next input/corner smoother
+	
+	if((GPIO_PORTB_DATA_R &0x01) == 1){
+		nextdir=0;
+	}
+	if((GPIO_PORTB_DATA_R &0x02) == 2){	//change back later
+		nextdir=1;
+	}
+	if((GPIO_PORTB_DATA_R &0x04) == 4){
+		nextdir=2;
+	}
+	if((GPIO_PORTB_DATA_R &0x08) == 8){
+		nextdir=3;	//if not working change back to dir
+	}
+	//next turn left	
+	if(nextdir==0){
+		Px--;	
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}//for
+		
+		if(clr==1){
+			dir=nextdir;
+			ST7735_DrawBitmap(Px, Py, pacmanchar, 8, 8);
+			clr=0;
+			nextdir=4;
+			//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		}
+		else{
+			Px++;
+		}
+	}
+	
+	//next turn up
+	if(nextdir==1){
+		Py--;	
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}//for
+		
+		if(clr==1){
+			dir=nextdir;
+			ST7735_DrawBitmap(Px, Py, pacmanup, 8, 8);
+			clr=0;
+			nextdir=4;
+			//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		}
+		else{
+			Py++;
+		}
+	}
+		
+	//next turn right
+		if(nextdir==2){
+		Px++;	
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}//for
+		
+		if(clr==1){
+			dir=nextdir;
+			ST7735_DrawBitmap(Px, Py, pacmanright, 8, 8);
+			clr=0;
+			nextdir=4;
+			//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		}
+		else{
+			Px--;
+		}
+	}
+		
+	//next turn down
+		if(nextdir==3){
+		Py++;	
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+				nextdir=4;
+			//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+			}//if
+		}//for
+		
+		if(clr==1){
+			dir=nextdir;
+			ST7735_DrawBitmap(Px, Py, pacmandown, 8, 8);
+			clr=0;
+			nextdir=4;
+			//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		}
+		else{
+			Py--;
+		}
+	}
+//////////////////////////////////////////////////////////////	
+	//pac left
+	if(dir==0){
+		ST7735_DrawBitmap(Px, Py, pacmanchar, 8, 8);
+		Px--;
+		//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Px, Py, pacmanchar, 8, 8);
+			clr=0;
+		}
+		else {		
+			Px++;
+			ST7735_DrawBitmap(Px, Py, pacmanchar, 8, 8);
+		}
+	}
+	
+	//pac up
+	if(dir==1){
+		ST7735_DrawBitmap(Px, Py, pacmanup, 8, 8);
+		Py--;
+		//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Px, Py, pacmanup, 8, 8);
+			clr=0;
+		}
+		else {		
+			Py++;
+			ST7735_DrawBitmap(Px, Py, pacmanup, 8, 8);
+		}
+	
+	}
+	//pac right
+	if(dir==2){
+		ST7735_DrawBitmap(Px, Py, pacmanright, 8, 8);
+		Px++;
+		//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Px, Py, pacmanright, 8, 8);
+			clr=0;
+		}
+		else {		
+			Px--;
+			ST7735_DrawBitmap(Px, Py, pacmanright, 8, 8);
+		}
+	
+	}
+	//pac down
+	if(dir==3){
+		ST7735_DrawBitmap(Px, Py, pacmandown, 8, 8);
+		Py++;
+		//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Px, Py, pacmandown, 8, 8);
+			clr=0;
+		}
+		else {		
+			Py--;
+			ST7735_DrawBitmap(Px, Py, pacmandown, 8, 8);
+		}
+	
+	}
+	
+	///////////////////////////////////////////////////////////////////////////	
+	countr++;
+	countr=countr%2; //toggle count, if this way doesnt work do count%2
+	if(countr==1){//move ghosts	
+	//all the ghosts moving randomly, replace color of ghost in draw function with blueghost
+		//check for turn option/////make sure random number generator only generates between 0 and 3
+/////////////////////////////red ghost///////////////////////
+do{
+	for(i=0;i<100;i++){
+	if((Rx==Turn[i].xturn) && (Ry==Turn[i].yturn)){
+		do{newRdir=(Random()%4);}
+		while(((Rdir+2)%4)==newRdir);			//just make sure the turn struct works
+			turn=1;
+		}
+	}
+	//check if the new dir an acceptable direction
+if(turn==1){
+//////////////////
+	if(newRdir==0){
+		Rx--;
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx++;
+			Rdir=newRdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Rx++;
+		}
+	}	
+///////////////////
+	if(newRdir==1){
+		Ry--;
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry--;
+			Rdir=newRdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Ry++;
+		}
+	}//if newRdir
+/////////////////////////
+	if(newRdir==2){
+		Rx++;
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx--;
+			Rdir=newRdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Rx--;
+		}
+	}//if newRdir
+////////////////////////////
+	if(newRdir==3){
+		Ry++;
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry++;
+			Rdir=newRdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Ry--;
+		}
+	}//if newRdir
+
+}//if turn
+}	while(turn==1);
+///////////////////////normal Red ghost movement	
+//Red left
+	if(Rdir==0){
+		ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+		Rx--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Rx++;
+			ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+		}
+	}
+		
+	//Red up
+	if(Rdir==1){
+		ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+		Ry--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Ry++;
+			ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+		}
+	
+	}	
+	//Red right
+	if(Rdir==2){
+		ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+		Rx++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Rx--;
+			ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+		}
+	
+}
+	//Red down
+	if(Rdir==3){
+		ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+		Ry++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Ry--;
+			ST7735_DrawBitmap(Rx, Ry, blueghost, 8, 8);
+		}
+	
+	}
+////////////////////////////Pink Ghost//////////////////////////		
+do{
+	for(i=0;i<100;i++){
+	if((PGx==Turn[i].xturn) && (PGy==Turn[i].yturn)){
+		do{newPGdir=(Random()%4);}
+		while(((PGdir+2)%4)==newPGdir);			//just make sure the turn struct works
+			turn=1;
+		}
+	}
+	//check if the new dir an acceptable direction
+if(turn==1){
+//////////////////
+	if(newPGdir==0){
+		PGx--;
+		for(i=0;i<3000;i++){
+			if((PGx==Path[i].xpath) && (PGy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx++;
+			PGdir=newPGdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			PGx++;
+		}
+	}	
+///////////////////
+	if(newPGdir==1){
+		PGy--;
+		for(i=0;i<3000;i++){
+			if((PGx==Path[i].xpath) && (PGy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry--;
+			PGdir=newPGdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			PGy++;
+		}
+	}//if newRdir
+/////////////////////////
+	if(newPGdir==2){
+		PGx++;
+		for(i=0;i<3000;i++){
+			if((PGx==Path[i].xpath) && (PGy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx--;
+			PGdir=newPGdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			PGx--;
+		}
+	}//if newRdir
+////////////////////////////
+	if(newPGdir==3){
+		PGy++;
+		for(i=0;i<3000;i++){
+			if((PGx==Path[i].xpath) && (PGy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry++;
+			PGdir=newPGdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			PGy--;
+		}
+	}//if newRdir
+
+}//if turn
+}	while(turn==1);
+///////////////////////normal orange ghost movement	
+//Orange left
+	if(PGdir==0){
+		ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+		PGx--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((PGx==Path[i].xpath) && (PGy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			PGx++;
+			ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+		}
+	}
+		
+	//Orange up
+	if(PGdir==1){
+		ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+		PGy--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((PGx==Path[i].xpath) && (PGy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			PGy++;
+			ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+		}
+	
+	}	
+	//Orange right
+	if(PGdir==2){
+		ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+		PGx++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((PGx==Path[i].xpath) && (PGy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			PGx--;
+			ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+		}
+	
+	}
+	//Orange down
+	if(PGdir==3){
+		ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+		PGy++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((PGx==Path[i].xpath) && (PGy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			PGy--;
+			ST7735_DrawBitmap(PGx, PGy, blueghost, 8, 8);
+		}
+	
+	}
+	
+//////////////////////////////////////////////////////////////////////////////////////////////stop changing shithere	
+///////////////////////////Orange ghost//////////////////////		
+	do{
+	for(i=0;i<100;i++){
+	if((Ox==Turn[i].xturn) && (Oy==Turn[i].yturn)){
+		do{newOdir=(Random()%4);}
+		while(((Odir+2)%4)==newOdir);			//just make sure the turn struct works
+			turn=1;
+		}
+	}
+	//check if the new dir an acceptable direction
+if(turn==1){
+//////////////////
+	if(newOdir==0){
+		Ox--;
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx++;
+			Odir=newOdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Ox++;
+		}
+	}	
+///////////////////
+	if(newOdir==1){
+		Oy--;
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry--;
+			Odir=newOdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Ry++;
+		}
+	}//if newRdir
+/////////////////////////
+	if(newOdir==2){
+		Ox++;
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx--;
+			Odir=newOdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Ox--;
+		}
+	}//if newRdir
+////////////////////////////
+	if(newOdir==3){
+		Oy++;
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry++;
+			Odir=newOdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Oy--;
+		}
+	}//if newRdir
+
+}//if turn
+}	while(turn==1);
+///////////////////////normal orange ghost movement	
+//orangeleft
+	if(Odir==0){
+		ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+		Ox--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Ox++;
+			ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+		}
+	}
+		
+	//orange up
+	if(Rdir==1){
+		ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+		Oy--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Oy++;
+			ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+		}
+	
+	}	
+	//orange right
+	if(Odir==2){
+		ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+		Ox++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Ox--;
+			ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+		}
+	
+	}
+	//orange down
+	if(Odir==3){
+		ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+		Oy++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Oy--;
+			ST7735_DrawBitmap(Ox, Oy, blueghost, 8, 8);
+		}
+	
+	}
+	///////////////////////////Cyan Ghost///////////////////////////////
+	do{
+	for(i=0;i<100;i++){
+	if((Cx==Turn[i].xturn) && (Cy==Turn[i].yturn)){
+		do{newCdir=(Random()%4);}
+		while(((Cdir+2)%4)==newOdir);			//just make sure the turn struct works
+			turn=1;
+		}
+	}
+	//check if the new dir an acceptable direction
+if(turn==1){
+//////////////////
+	if(newCdir==0){
+		Cx--;
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx++;
+			Cdir=newCdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Cx++;
+		}
+	}	
+///////////////////
+	if(newCdir==1){
+		Cy--;
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry--;
+			Cdir=newCdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Cy++;
+		}
+	}//if newRdir
+/////////////////////////
+	if(newCdir==2){
+		Cx++;
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx--;
+			Cdir=newCdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Cx--;
+		}
+	}//if newRdir
+////////////////////////////
+	if(newCdir==3){
+		Cy++;
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry++;
+			Cdir=newCdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Cy--;
+		}
+	}//if newRdir
+
+}//if turn
+}	while(turn==1);
+///////////////////////normal Cyan ghost movement	
+//Cyan left
+	if(Cdir==0){
+		ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+		Cx--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Cx++;
+			ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+		}
+	}
+		
+	//Cyan up
+	if(Cdir==1){
+		ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+		Cy--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Cy++;
+			ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+		}
+	
+	}	
+	//Cyan right
+	if(Cdir==2){
+		ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+		Cx++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Cx--;
+			ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+		}
+	
+	}
+	//Cyan down
+	if(Cdir==3){
+		ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+		Cy++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+			clr=0;
+		}
+		else {		
+			Cy--;
+			ST7735_DrawBitmap(Cx, Cy, blueghost, 8, 8);
+		}
+	
+	}
+
+	}//if that lets the ghosts move
+	
+	
+	//at the end of the loop check if pacman has eaten any ghost
+	if((((Px-Rx)*(Px-Rx)) + ((Py-Ry)*(Py-Ry))) <16 ){
+		//pacman ate ghost
+		ST7735_DrawBitmap(Rx, Ry, blacksquare, 8, 8);
+		Rx=45;
+		Ry=83;
+		Rdir=4;
+		}
+	if((((Px-PGx)*(Px-PGx)) + ((Py-PGy)*(Py-PGy))) <16){
+		//pacman ate ghost
+		ST7735_DrawBitmap(PGx, PGy, blacksquare, 8, 8);
+		PGx=50;
+		PGy=83;
+		PGdir=4;
+		}
+	if((((Px-Ox)*(Px-Ox)) + ((Py-Oy)*(Py-Oy))) <16 ){
+		//pacman ate ghost
+		ST7735_DrawBitmap(Ox, Oy, blacksquare, 8, 8);
+		Ox=56;
+		Oy=83;
+		Odir=4;
+		}
+	if((((Px-Cx)*(Px-Cx)) + ((Py-Cy)*(Py-Cy))) <16){
+		//pacman ate ghost
+		ST7735_DrawBitmap(Cx, Cy, blacksquare, 8, 8);
+		Cx=60;
+		Cy=83;
+		Cdir=4;
+		}
+	
+	//Redraw the dots and black areas
+	
+	}//while
+}//blueghost
+int main(void){
+  TExaS_Init();  // set system clock to 80 MHz
+  Random_Init(1);
+	//ADC_Init();
+  Output_Init();
+  ST7735_FillScreen(0x0000);            // set screen to black
+  Port_Init();
+	Element_Init();	
+	Path_Init();
+	Turn_Init();
+	              // delay 5 sec at 80 MHz
+
+	ST7735_DrawBitmap(0, 159, Pacman, 128, 160);
+	ST7735_DrawBitmap(61, 115, pacmanchar, 8, 8);
+	ST7735_DrawBitmap(41, 59, redghosty, 8, 8);
+	ST7735_DrawBitmap(50, 59, pinkghostx, 8, 8);
+	ST7735_DrawBitmap(63, 59, orangeghostleft, 8, 8);
+	ST7735_DrawBitmap(75, 59, cyanghostx, 8, 8);
+	
+  /*ST7735_FillScreen(0x0000);            // set screen to black
+  ST7735_SetCursor(1, 1);
+  ST7735_OutString("GAME OVER");
+  ST7735_SetCursor(1, 2);
+  ST7735_OutString("Nice try,");
+  ST7735_SetCursor(1, 3);
+  ST7735_OutString("Earthling!");
+  ST7735_SetCursor(2, 4);
+  LCD_OutDec(1234);*/
+	
+	SysTick_Init();
+  //Delay100ms(50);
+while(1){			//start with 4 if statements that depend on what button(direction) is chosen 
+	Random_Init(2);
+  //Random_Init(NVIC_ST_CURRENT_R);
+	
+	Delay100ms(1);
+	
+	//redraw dots before movement so they don't write over the charcters for very long
+	for(i=0;i<240;i++){
+	x=Food[i].present;
+	if(x==1){
+		ST7735_DrawBitmap((Food[i].xcoor)+2, (Food[i].ycoor)-2, fooddot, 4, 4);
+	}
+	//else{
+		//ST7735_DrawBitmap((Food[i].xcoor)+2, (Food[i].ycoor)-2, blackdot, 4, 4);
+	//}
+}
+	//choose pac direction
+	if((GPIO_PORTB_DATA_R &0x01) == 1){
+		nextdir=0;
+	}
+	if((GPIO_PORTB_DATA_R &0x02) == 2){	//change back later
+		nextdir=1;
+	}
+	if((GPIO_PORTB_DATA_R &0x04) == 4){
+		nextdir=2;
+	}
+	if((GPIO_PORTB_DATA_R &0x08) == 8){
+		nextdir=3;	//if not working change back to dir
+	}
+	
+//////////////////////////////////////////////////////////////
+//way to maintain the players next input/corner smoother
+	//next turn left
+	
+	if(nextdir==0){
+		Px--;	
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}//for
+		
+		if(clr==1){
+			dir=nextdir;
+			ST7735_DrawBitmap(Px, Py, pacmanchar, 8, 8);
+			clr=0;
+			nextdir=4;
+			//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		}
+		else{
+			Px++;
+		}
+	}
+	
+	//next turn up
+	if(nextdir==1){
+		Py--;	
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}//for
+		
+		if(clr==1){
+			dir=nextdir;
+			ST7735_DrawBitmap(Px, Py, pacmanup, 8, 8);
+			clr=0;
+			nextdir=4;
+			//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		}
+		else{
+			Py++;
+		}
+	}
+		
+	//next turn right
+		if(nextdir==2){
+		Px++;	
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}//for
+		
+		if(clr==1){
+			dir=nextdir;
+			ST7735_DrawBitmap(Px, Py, pacmanright, 8, 8);
+			clr=0;
+			nextdir=4;
+			//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		}
+		else{
+			Px--;
+		}
+	}
+		
+	//next turn down
+		if(nextdir==3){
+		Py++;	
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}//for
+		
+		if(clr==1){
+			dir=nextdir;
+			ST7735_DrawBitmap(Px, Py, pacmandown, 8, 8);
+			clr=0;
+			nextdir=4;
+			//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		}
+		else{
+			Py--;
+		}
+	}
+//////////////////////////////////////////////////////////////	
+	//pac left
+	if(dir==0){
+		ST7735_DrawBitmap(Px, Py, pacmanchar, 8, 8);
+		Px--;
+		//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Px, Py, pacmanchar, 8, 8);
+			clr=0;
+		}
+		else {		
+			Px++;
+			ST7735_DrawBitmap(Px, Py, pacmanchar, 8, 8);
+		}
+		
+	}
+	
+	//pac up
+	if(dir==1){
+		ST7735_DrawBitmap(Px, Py, pacmanup, 8, 8);
+		Py--;
+		//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Px, Py, pacmanup, 8, 8);
+			clr=0;
+		}
+		else {		
+			Py++;
+			ST7735_DrawBitmap(Px, Py, pacmanup, 8, 8);
+		}
+	
+	}
+	//pac right
+	if(dir==2){
+		ST7735_DrawBitmap(Px, Py, pacmanright, 8, 8);
+		Px++;
+		//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Px, Py, pacmanright, 8, 8);
+			clr=0;
+		}
+		else {		
+			Px--;
+			ST7735_DrawBitmap(Px, Py, pacmanright, 8, 8);
+		}
+	
+	}
+	//pac down
+	if(dir==3){
+		ST7735_DrawBitmap(Px, Py, pacmandown, 8, 8);
+		Py++;
+		//scoring
+		for(i=0;i<240;i++){	
+				x=Food[i].xcoor;
+				y=Food[i].ycoor;
+		if(((Px)==Food[i].xcoor)&&((Py)==Food[i].ycoor))	//b/c of initialization, coordinates should just line up with Px and Py
+			{if(Food[i].present==1){
+			score++;	
+			Food[i].present=0;}
+			break;}		//if Pac hits food, then should exit the for loop
+		}
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Px==Path[i].xpath) && (Py == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Px, Py, pacmandown, 8, 8);
+			clr=0;
+		}
+		else {		
+			Py--;
+			ST7735_DrawBitmap(Px, Py, pacmandown, 8, 8);
+		}
+	
+	}
+
+				
+////////////////////////////red ghost movement///////////////////////////////		
+
+////////////////////////////Redghost targeting system//////////////////////////
+//Rdir=0;
+
+Rhold=1000000;
+	for(i=0;i<4;i++){
+		if(i==0){Rxt=(Rx-1); Ryt=Ry;} //and part not completely necessary &&(i!=((Rdir+2)%4)))
+		if(i==1){Ryt=(Ry-1); Rxt=Rx;} //&&(i!=((Rdir+2)%4)))
+		if(i==2){Rxt=(Rx+1); Ryt=Ry;} //&&(i!=((Rdir+2)%4)))
+		if(i==3){Ryt=(Ry+1); Rxt=Rx;} //&&(i!=((Rdir+2)%4)))
+		
+		for(j=0;j<3000;j++){	//search the path array to make sure next turn is possible
+			if((Rxt==Path[j].xpath) && (Ryt == Path[j].ypath)){
+				clr=1;
+			}//if
+		}
+		
+		if(clr==1){
+			Redtarget[i].open=1;
+			Redtarget[i].tar=((Rxt-Px)*(Rxt-Px))+((Ryt-Py)*(Ryt-Py));//basically finding distance between the ghost and pac man
+			clr=0;
+		}
+		else{
+			Redtarget[i].open=0;
+		}
+	}//bigfor
+	for(i=0;i<4;i++){
+		if(i==((Rdir+2)%4)){Redtarget[i].open=0;}//pacman can't reverse directions so make sure it isn't even considered
+}
+	
+	for(j=0;j<4;j++){
+		//if((Redtarget[j].open==1)&&(Redtarget[j].tar<<Rhold)){
+		x=Redtarget[j].open;
+		y=Redtarget[j].tar;
+		if((x==1)&&(y<Rhold)){
+			Rhold=Redtarget[j].tar;
+			Rdir=j;		//set Rdir equal to the direction with the shortest distance to pac man
+		}
+	}
+
+/////////////////////////////normal redghost movement/////////////////////////////
+	//redghosty left
+	if(Rdir==0){
+		ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+		Rx--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+			clr=0;
+		}
+		else {		
+			Rx++;
+			ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+		}
+	}
+		
+	//redghosty up
+	if(Rdir==1){
+		ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+		Ry--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+			clr=0;
+		}
+		else {		
+			Ry++;
+			ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+		}
+	
+	}	
+	//redghosty right
+	if(Rdir==2){
+		ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+		Rx++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+			clr=0;
+		}
+		else {		
+			Rx--;
+			ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+		}
+	
+	}
+	//redghosty down
+	if(Rdir==3){
+		ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+		Ry++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Rx==Path[i].xpath) && (Ry == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+			clr=0;
+		}
+		else {		
+			Ry--;
+			ST7735_DrawBitmap(Rx, Ry, redghosty, 8, 8);
+		}
+	
+	}
+	
+	////////////////////////////Pink ghost targeting system//////////////////////////////////	
+	
+	Rhold=1000000;
+	for(i=0;i<4;i++){
+		if(i==0){Rxt=(PGx-1); Ryt=PGy;} //and part not completely necessary &&(i!=((Rdir+2)%4)))
+		if(i==1){Ryt=(PGy-1); Rxt=PGx;} //&&(i!=((Rdir+2)%4)))
+		if(i==2){Rxt=(PGx+1); Ryt=PGy;} //&&(i!=((Rdir+2)%4)))
+		if(i==3){Ryt=(PGy+1); Rxt=PGx;} //&&(i!=((Rdir+2)%4)))
+		
+		for(j=0;j<3000;j++){	//search the path array to make sure next turn is possible
+			if((Rxt==Path[j].xpath) && (Ryt == Path[j].ypath)){
+				clr=1;
+			}//if
+		}
+		///////////////////////////////////for when pacman is moving left
+	if(dir==0){	
+		if(clr==1){	
+			Redtarget[i].open=1;
+			Redtarget[i].tar=((Rxt-(Px-10))*(Rxt-(Px-10)))+((Ryt-Py)*(Ryt-Py));//basically finding distance between the ghost and pac man
+			clr=0;
+		}
+		else{
+			Redtarget[i].open=0;
+		}
+	}
+		/////////////////////////////////for when pacman is moving up
+	if(dir==1){	
+		if(clr==1){
+			Redtarget[i].open=1;
+			Redtarget[i].tar=((Rxt-Px)*(Rxt-Px))+((Ryt-(Py-15))*(Ryt-(Py-15)));//basically finding distance between the ghost and pac man
+			clr=0;
+		}
+		else{
+			Redtarget[i].open=0;
+		}	
+	}		
+		//////////////////////////////////for when pacman is moving right
+	if(dir==2){	
+		if(clr==1){	
+			Redtarget[i].open=1;
+			Redtarget[i].tar=((Rxt-(Px+18))*(Rxt-(Px+18)))+((Ryt-Py)*(Ryt-Py));//basically finding distance between the ghost and pac man
+			clr=0;
+		}
+		else{
+			Redtarget[i].open=0;
+		}
+	}	
+		//////////////////////////////////for when pacman is moving down
+	if(dir==3){	
+		if(clr==1){	
+			Redtarget[i].open=1;
+			Redtarget[i].tar=((Rxt-Px)*(Rxt-Px))+((Ryt-(Py+8))*(Ryt-(Py+8)));//basically finding distance between the ghost and pac man
+			clr=0;
+		}
+		else{
+			Redtarget[i].open=0;
+		}
+	}	
+		//////////////////////////////////
+		
+	}//bigfor
+	for(i=0;i<4;i++){
+		if(i==((Rdir+2)%4)){Redtarget[i].open=0;}//pacman can't reverse directions so make sure it isn't even considered
+}
+	
+	for(j=0;j<4;j++){
+		//if((Redtarget[j].open==1)&&(Redtarget[j].tar<<Rhold)){
+		x=Redtarget[j].open;
+		y=Redtarget[j].tar;
+		if((x==1)&&(y<Rhold)){
+			Rhold=Redtarget[j].tar;
+			PGdir=j;		//set Rdir equal to the direction with the shortest distance to pac man
+		}
+	}
+//////////////////////////pink ghost movement/////////////////////////////////
+	//pink ghost left
+	if(PGdir==0){
+		ST7735_DrawBitmap(PGx, PGy, pinkghostx, 8, 8);
+		PGx--;
+		//check for wall
+		ST7735_DrawBitmap(PGx, PGy, pinkghostx, 8, 8);
+	}
+		
+	//pink ghost up
+	if(PGdir==1){
+		ST7735_DrawBitmap(PGx, PGy, pinkghosty, 8, 8);
+		PGy--;
+		//check for wall
+		ST7735_DrawBitmap(PGx, PGy, pinkghosty, 8, 8);
+	}	
+	//pink ghost right
+	if(PGdir==2){
+		ST7735_DrawBitmap(PGx, PGy, pinkghostx, 8, 8);
+		PGx++;
+		//check for wall
+		ST7735_DrawBitmap(PGx, PGy, pinkghostx, 8, 8);
+		
+	}
+	//pink ghost down
+	if(PGdir==3){
+		ST7735_DrawBitmap(PGx, PGy, pinkghosty, 8, 8);
+		PGy++;
+		//check for wall
+		ST7735_DrawBitmap(PGx, PGy, pinkghosty, 8, 8);
+		
+	}
+	
+	///////////////////////orange ghost//////////////////
+	
+//check for turn option/////make sure random number generator only generates between 0 and 3
+	do{
+	for(i=0;i<100;i++){
+	if((Ox==Turn[i].xturn) && (Oy==Turn[i].yturn)){
+		do{newOdir=(Random()%4);}
+		while(((Odir+2)%4)==newOdir);			//just make sure the turn struct works
+			turn=1;
+		}
+	}
+	//check if the new dir an acceptable direction
+if(turn==1){
+//////////////////
+	if(newOdir==0){
+		Ox--;
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx++;
+			Odir=newOdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Ox++;
+		}
+	}	
+///////////////////
+	if(newOdir==1){
+		Oy--;
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry--;
+			Odir=newOdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Oy++;
+		}
+	}//if newRdir
+/////////////////////////
+	if(newOdir==2){
+		Ox++;
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx--;
+			Odir=newOdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Ox--;
+		}
+	}//if newRdir
+////////////////////////////
+	if(newOdir==3){
+		Oy++;
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry++;
+			Odir=newOdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Oy--;
+		}
+	}//if newRdir
+
+}//if turn
+}	while(turn==1);
+///////////////////////normal orange ghost movement	
+//Orange left
+	if(Odir==0){
+		ST7735_DrawBitmap(Ox, Oy, orangeghostleft, 8, 8);
+		Ox--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Ox, Oy, orangeghostleft, 8, 8);
+			clr=0;
+		}
+		else {		
+			Ox++;
+			ST7735_DrawBitmap(Ox, Oy, orangeghostleft, 8, 8);
+		}
+	}
+		
+	//Orange up
+	if(Rdir==1){
+		ST7735_DrawBitmap(Ox, Oy, orangeghostleft, 8, 8);
+		Oy--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Ox, Oy, orangeghostleft, 8, 8);
+			clr=0;
+		}
+		else {		
+			Oy++;
+			ST7735_DrawBitmap(Ox, Oy, orangeghostleft, 8, 8);
+		}
+	
+	}	
+	//Orange right
+	if(Odir==2){
+		ST7735_DrawBitmap(Ox, Oy, orangeghostright, 8, 8);
+		Ox++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Ox, Oy, orangeghostright, 8, 8);
+			clr=0;
+		}
+		else {		
+			Ox--;
+			ST7735_DrawBitmap(Ox, Oy, orangeghostright, 8, 8);
+		}
+	
+	}
+	//Orange down
+	if(Odir==3){
+		ST7735_DrawBitmap(Ox, Oy, orangeghostright, 8, 8);
+		Oy++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Ox==Path[i].xpath) && (Oy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Ox, Oy, orangeghostright, 8, 8);
+			clr=0;
+		}
+		else {		
+			Oy--;
+			ST7735_DrawBitmap(Ox, Oy, orangeghostright, 8, 8);
+		}
+	
+	}
+
+//////////////////////////Cyan Ghost//////////////////////////////
+		
+//check for turn option/////make sure random number generator only generates between 0 and 3
+	do{
+	for(i=0;i<100;i++){
+	if((Cx==Turn[i].xturn) && (Cy==Turn[i].yturn)){
+		do{newCdir=(Random()%4);}
+		while(((Cdir+2)%4)==newCdir);			//just make sure the turn struct works
+			turn=1;
+		}
+	}
+	//check if the new dir an acceptable direction
+if(turn==1){
+//////////////////
+	if(newCdir==0){
+		Cx--;
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx++;
+			Cdir=newCdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Cx++;
+		}
+	}	
+///////////////////
+	if(newCdir==1){
+		Cy--;
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry--;
+			Cdir=newCdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Cy++;
+		}
+	}//if newRdir
+/////////////////////////
+	if(newCdir==2){
+		Cx++;
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Rx--;
+			Cdir=newCdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Cx--;
+		}
+	}//if newRdir
+////////////////////////////
+	if(newCdir==3){
+		Cy++;
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){
+			//Ry++;
+			Cdir=newCdir;
+			clr=0;
+			turn=0;
+		}
+		else{
+			Cy--;
+		}
+	}//if newRdir
+
+}//if turn
+}	while(turn==1);
+///////////////////////normal Cyan ghost movement	
+//Cyan left
+	if(Cdir==0){
+		ST7735_DrawBitmap(Cx, Cy, cyanghostx, 8, 8);
+		Cx--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Cx, Cy, cyanghostx, 8, 8);
+			clr=0;
+		}
+		else {		
+			Cx++;
+			ST7735_DrawBitmap(Cx, Cy, cyanghostx, 8, 8);
+		}
+	}
+		
+	//Cyan up
+	if(Cdir==1){
+		ST7735_DrawBitmap(Cx, Cy, cyanghosty, 8, 8);
+		Cy--;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Cx, Cy, cyanghosty, 8, 8);
+			clr=0;
+		}
+		else {		
+			Cy++;
+			ST7735_DrawBitmap(Cx, Cy, cyanghosty, 8, 8);
+		}
+	
+	}	
+	//Cyan right
+	if(Cdir==2){
+		ST7735_DrawBitmap(Cx, Cy, cyanghostx, 8, 8);
+		Cx++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Cx, Cy, cyanghostx, 8, 8);
+			clr=0;
+		}
+		else {		
+			Cx--;
+			ST7735_DrawBitmap(Cx, Cy, cyanghostx, 8, 8);
+		}
+	
+	}
+	//Cyan down
+	if(Cdir==3){
+		ST7735_DrawBitmap(Cx, Cy, cyanghosty, 8, 8);
+		Cy++;
+		//check for wall
+		for(i=0;i<3000;i++){
+			if((Cx==Path[i].xpath) && (Cy == Path[i].ypath)){
+				clr=1;
+			}//if
+		}
+		if(clr==1){			//open space like normal
+			ST7735_DrawBitmap(Cx, Cy, cyanghosty, 8, 8);
+			clr=0;
+		}
+		else {		
+			Cy--;
+			ST7735_DrawBitmap(Cx, Cy, cyanghosty, 8, 8);
+		}
+	
+	}
+	
+	//check if pacman dead
+		
+		if((((Px-Rx)*(Px-Rx)) + ((Py-Ry)*(Py-Ry))) <16 ){
+		//ghost ate pacman
+			pac_dead();
+		}
+		if((((Px-PGx)*(Px-PGx)) + ((Py-PGy)*(Py-PGy))) <16){
+		//ghost ate pacman
+			pac_dead();
+		}
+		if((((Px-Ox)*(Px-Ox)) + ((Py-Oy)*(Py-Oy))) <16 ){
+		//ghost ate pacman
+			pac_dead();
+		}
+		if((((Px-Cx)*(Px-Cx)) + ((Py-Cy)*(Py-Cy))) <16){
+		//ghost ate pacman
+			pac_dead();
+		}
+		//////////////check if he ate a big dot
+		for(i=0;i<4;i++){
+		if((Px==Bigdot[i].x)&&(Py==Bigdot[i].y)&&(Bigdot[i].present==1)){
+			Bigdot[i].present=0;
+			blue_ghost();
+			Odir=0;
+			Cdir=2;
+		}
+	}
+	
+	//score counter
+	ST7735_SetCursor(1, 15);
+  ST7735_OutString("score");
+	score3=score;
+	
+	score1=score3/10;
+	score1=score1*10;
+	score1=score3-score1;	//score 1 tens place
+	//score1=score1/10;
+
+	score3=score3/10;
+	score2=(score3/10);
+	score2=(score2*10);
+	score2=score3-score2;	//score2 hundreds places
+	
+	score3=score3/10;
+	ST7735_OutChar((score3+0x30));
+	ST7735_OutChar((score2+0x30));
+	ST7735_OutChar((score1+0x30));
+	ST7735_OutChar('0');
+	///////endgame victory/////////
+	if(score==240){	//or something with element array depending on if add more wys to score
+		Winner();
+	}
+  }//while
+
+}//main
+
+
+// You can use this timer only if you learn how it works
+
+void Delay100ms(uint32_t count){uint32_t volatile time;
+  while(count>0){
+    time = 7272;  // 0.1sec at 80 MHz	//ADD 40 FOR DELAY 100MS, RIGHT NOW AT ~1MS
+    while(time){
+	  	time--;
+    }
+    count--;
+  }
+}
+
